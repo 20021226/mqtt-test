@@ -244,22 +244,6 @@ def test_parse_message():
 
 
 
-def show_help():
-    """
-    显示帮助信息
-    """
-    print("MQTT测试工具使用说明:")
-    print("  python mqtt-test.py                  - 启动MQTT客户端，连接服务器并监听消息")
-    print("  python mqtt-test.py --test           - 运行测试解析功能")
-    print("  python mqtt-test.py --query [选项]   - 查询数据库记录")
-    print("    --limit N                         - 限制返回的记录数量 (默认: 10)")
-    print("    --type TYPE                       - 按类型过滤 (system, pcs, bms, fire, other)")
-    print("    --normal                          - 只显示正常状态的记录")
-    print("    --abnormal                        - 只显示异常状态的记录")
-    print("    --module N                        - 按模块编号过滤")
-    print("  python mqtt-test.py --stats          - 显示数据库统计信息")
-    print("  python mqtt-test.py --clear          - 清空数据库记录")
-    print("  python mqtt-test.py --help           - 显示此帮助信息")
 
 def main():
     # 默认启动MQTT客户端
