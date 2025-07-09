@@ -76,3 +76,7 @@ DB_CONFIG = {
     "db_file": "mqtt_records.db",
     "table_name": "device_records"
 }
+
+class DEVICE:
+    DEVICE_ID = "FZAUS0000001"
+    DEVICE_MODULE = "1"

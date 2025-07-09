@@ -4,7 +4,7 @@ import time
 import sys
 import argparse
 from typing import Dict, Any, List
-from config import MQTT_CONFIG, STATE_DEFINITIONS, TYPE_MAPPING
+from config import MQTT_CONFIG, STATE_DEFINITIONS, TYPE_MAPPING, DEVICE
 import db_operations as db
 
 def parse_device_message(raw_message: Dict[str, Any], module_number: int = 1) -> list:
@@ -120,7 +120,7 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Connected to MQTT broker successfully!")
         # 订阅主题 (根据实际需求修改主题)
-        client.subscribe("GLOBALPOWER/FZAUS0000001/STATE_FAULT_DATA/1", qos=MQTT_CONFIG["qos"])
+        client.subscribe(f"GLOBALPOWER/{DEVICE.DEVICE_ID}/STATE_FAULT_DATA/{DEVICE.DEVICE_MODULE}", qos=MQTT_CONFIG["qos"])
     else:
         print(f"Failed to connect, return code {rc}")
 
@@ -137,8 +137,7 @@ def on_message(client, userdata, msg):
         timestamp = message_data.get("time", int(time.time()))
         
         # 解析设备消息 (假设模块编号可以从主题或消息中获取)
-        module_number = 1  # 这里需要根据实际情况获取模块编号
-        parsed_records = parse_device_message(message_data, module_number)
+        parsed_records = parse_device_message(message_data, DEVICE.DEVICE_MODULE)
         
         if parsed_records:
             print(f"Parsed {len(parsed_records)} records:")
@@ -158,8 +157,6 @@ def on_message(client, userdata, msg):
         import traceback
         traceback.print_exc()
 
-
-
 def setup_mqtt_client():
     """设置并返回 MQTT 客户端"""
     client = mqtt.Client()
@@ -168,82 +165,6 @@ def setup_mqtt_client():
     client.on_message = on_message
     
     return client
-
-def test_parse_message():
-    """
-    测试解析消息功能并保存到数据库
-    """
-    # 测试数据
-    test_message = {
-        "time": 1751961896,
-        "data": [
-            {
-                "type": 0,
-                "state": [32, 0]
-            },
-            {
-                "type": 1,
-                "state": [0, 0]
-            },
-            {
-                "type": 2,
-                "state": [3, 0, 0]
-            },
-            {
-                "type": 3,
-                "state": [0, 0]
-            },
-            {
-                "type": 4,
-                "state": [0, 0, 0, 0]
-            },
-            {
-                "type": 5,
-                "state": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-            },
-            {
-                "type": 6,
-                "state": [0, 0, 0, 0, 0, 0, 0, 0]
-            },
-            {
-                "type": 7,
-                "state": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-            },
-            {
-                "type": 8,
-                "state": [0]
-            }
-        ]
-    }
-    
-    # 获取时间戳
-    timestamp = test_message.get("time", int(time.time()))
-    
-    # 解析消息
-    records = parse_device_message(test_message)
-    
-    # 打印结果
-    print(f"解析结果: 共 {len(records)} 条记录")
-    for record in records:
-        print(json.dumps(record, indent=4, ensure_ascii=False))
-        print("---")
-    
-    # 保存到数据库
-    if records:
-        print("正在保存记录到数据库...")
-        conn = db.init_database()
-        db.save_records(conn, records, timestamp)
-        
-        # 查询并显示保存的记录数量
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT COUNT(*) FROM device_records")
-        count = cursor.fetchone()[0]
-        print(f"数据库中共有 {count} 条记录")
-        
-        conn.close()
-
-
-
 
 def main():
     # 默认启动MQTT客户端
