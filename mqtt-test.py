@@ -1,8 +1,8 @@
+import logging
 import paho.mqtt.client as mqtt
 import json
 import time
-import sys
-import argparse
+import traceback
 from typing import Dict, Any, List
 from config import MQTT_CONFIG, STATE_DEFINITIONS, TYPE_MAPPING, DEVICE
 import db_operations as db
@@ -38,7 +38,7 @@ def parse_device_message(raw_message: Dict[str, Any], module_number: int = 1) ->
         type_definitions = STATE_DEFINITIONS.get(type_name)
         if not type_definitions:
             continue
-        
+    
         # 根据不同类型处理状态数据
         if type_name == "bms":
             # BMS状态使用索引直接获取值
@@ -47,6 +47,127 @@ def parse_device_message(raw_message: Dict[str, Any], module_number: int = 1) ->
                 if index is not None and index < len(state_data):
                     value = state_data[index]
                     records.append(create_record(code, value, definition, type_name, module_number))
+        elif type_name == "liquidCoolingFaults":
+            # 液冷故障状态使用索引直接获取值
+            for code, definition in type_definitions.items():
+                if len(state_data) > 0:
+                    value = state_data[0]
+                else:
+                    value = 0
+                    logging.warning(f'state_data 为空')
+                # 检查位值是否在定义中
+                number = definition.get('number', None)
+                # 默认正常 0
+                values = 0
+                if number==value:
+                    values=1
+                records.append(create_record(code, values, definition, type_name, module_number))              
+        elif type_name == "airConditioner":
+            # 空调状态，每8位表示一个类型，数组索引0表示byte1，索引1表示byte2
+            for code, definition in type_definitions.items():
+                bit = definition.get("bit")
+                if bit is None:
+                    continue
+                
+                # 确定是byte1还是byte2
+                byte_type = code.split(".")[0] if "." in code else ""
+                array_index = 0  # 默认为byte1 (索引0)
+                
+                if byte_type == "byte2":
+                    array_index = 1
+                elif byte_type == "byte3":
+                    array_index = 2
+                elif byte_type == "byte4":
+                    array_index = 3
+                
+                # 检查数组索引是否有效
+                if array_index < len(state_data):
+                    # 使用8位宽度获取位值
+                    value = (state_data[array_index] >> bit) & 1
+                    if value is not None:
+                        records.append(create_record(code, value, definition, type_name, module_number))
+        elif type_name == "bmsFaults":
+            # bmsFaults每4个元素表示一个类型，最后一个使用2个元素，每个元素8个字节
+            for sub_type, sub_definitions in type_definitions.items():
+                # 确定子类型的起始索引
+                start_index = 0
+                if sub_type == "moderateAlarms":
+                    start_index = 4
+                elif sub_type == "seriousAlarms":
+                    start_index = 8
+                elif sub_type == "faults":
+                    start_index = 12
+                
+                # 检查数组长度是否足够
+                if start_index + 4 > len(state_data):
+                    continue
+                
+                # 处理每个子类型的定义
+                for code, definition in sub_definitions.items():
+                    bit = definition.get("bit")
+                    if bit is None:
+                        continue
+                    
+                    # 计算实际的数组索引和位偏移
+                    element_index = bit // 32  # 每个元素32位
+                    bit_offset = bit % 32
+                    
+                    # 检查元素索引是否有效
+                    if element_index < 4:  # 最多4个元素
+                        array_index = start_index + element_index
+                        if array_index < len(state_data):
+                            value = (state_data[array_index] >> bit_offset) & 1
+                            if value is not None:
+                                records.append(create_record(code, value, definition, f"{type_name}.{sub_type}", module_number))
+        elif type_name == "pcsFaults":
+            # pcsFaults每个类型使用2个字节表示，相当于数组的两个元素
+            for element_key, element_definitions in type_definitions.items():
+                try:
+                    element_index = int(element_key) - 1  # 元素索引从0开始，但定义从1开始
+                    base_index = element_index * 2  # 每个元素占用2个数组位置
+                    
+                    # 检查数组长度是否足够
+                    if base_index + 1 >= len(state_data):
+                        continue
+                    
+                    # 处理每个元素的定义
+                    for code, definition in element_definitions.items():
+                        bit = definition.get("bit")
+                        if bit is None:
+                            continue
+                        
+                        # 计算16位值
+                        word_value = (state_data[base_index + 1] << 8) | state_data[base_index]
+                        value = (word_value >> bit) & 1
+                        
+                        if value is not None:
+                            records.append(create_record(code, value, definition, type_name, module_number))
+                except (ValueError, IndexError):
+                    continue
+        elif type_name == "dcdcFaults":
+            # dcdcFaults每个类型使用1个字节表示，相当于数组的一个元素
+            for byte_key, byte_definitions in type_definitions.items():
+                # 确定字节索引
+                try:
+                    byte_num = int(byte_key.replace("byte", ""))
+                    array_index = byte_num - 1  # 数组索引从0开始，但byte从1开始
+                    
+                    # 检查数组长度是否足够
+                    if array_index >= len(state_data):
+                        continue
+                    
+                    # 处理每个字节的定义
+                    for code, definition in byte_definitions.items():
+                        bit = definition.get("bit")
+                        if bit is None:
+                            continue
+                        
+                        # 使用8位宽度获取位值
+                        value = (state_data[array_index] >> bit) & 1
+                        if value is not None:
+                            records.append(create_record(code, value, definition, type_name, module_number))
+                except (ValueError, IndexError):
+                    continue
         else:
             # 其他状态使用位操作解析
             for code, definition in type_definitions.items():
@@ -62,26 +183,23 @@ def parse_device_message(raw_message: Dict[str, Any], module_number: int = 1) ->
     
     return records
 
-def get_bit_value(state_data: list, bit: int) -> int:
-    """
-    从状态数据中获取指定位的值
+def get_bit_value(state_data, bit, bit_width=8):
+    # 根据位宽计算索引和偏移
+    if bit_width == 8:  # 字节
+        index = bit // 8
+        offset = bit % 8
+    elif bit_width == 16:  # 字
+        index = bit // 16
+        offset = bit % 16
+    elif bit_width == 32:  # 双字
+        index = bit // 32
+        offset = bit % 32
+    else:
+        logging.error(f"不支持的位宽: {bit_width}")
+        return None
     
-    :param state_data: 状态数据列表
-    :param bit: 位索引
-    :return: 位值，如果无法获取则返回None
-    """
-    # 计算位所在的字节索引和位偏移
-    byte_index = bit // 8
-    bit_offset = bit % 8
-    
-    # 确保状态数据长度足够
-    if byte_index < len(state_data):
-        # 获取对应字节的值
-        byte_value = state_data[byte_index]
-        
-        # 提取对应位的值
-        return (byte_value >> bit_offset) & 1
-    
+    if index < len(state_data):
+        return (state_data[index] >> offset) & 1
     return None
 
 def create_record(code: str, value: int, definition: Dict[str, Any], type_name: str, module_number: int) -> Dict[str, Any]:
@@ -154,7 +272,6 @@ def on_message(client, userdata, msg):
             
     except Exception as e:
         print(f"Error processing message: {str(e)}")
-        import traceback
         traceback.print_exc()
 
 def setup_mqtt_client():
