@@ -87,7 +87,7 @@ def parse_device_message(raw_message: Dict[str, Any], module_number: int = 1) ->
                         value = (state_data[array_index] >> bit) & 1
                         
                         # 创建完整的code标识符
-                        code = f"{byte_name}.{field_name}"
+                        code = f"{field_name}"
                         
                         if value is not None:
                             records.append(create_record(code, value, definition, type_name, module_number))
