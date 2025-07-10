@@ -64,30 +64,35 @@ def parse_device_message(raw_message: Dict[str, Any], module_number: int = 1) ->
                 records.append(create_record(code, values, definition, type_name, module_number))              
         elif type_name == "airConditioner":
             # 空调状态，每8位表示一个类型，数组索引0表示byte1，索引1表示byte2
-            for code, definition in type_definitions.items():
-                bit = definition.get("bit")
-                if bit is None:
-                    continue
-                
-                # 确定是byte1还是byte2
-                byte_type = code.split(".")[0] if "." in code else ""
+            for byte_name, byte_definitions in type_definitions.items():
+                # 确定数组索引
                 array_index = 0  # 默认为byte1 (索引0)
                 
-                if byte_type == "byte2":
+                if byte_name == "byte2":
                     array_index = 1
-                elif byte_type == "byte3":
+                elif byte_name == "byte3":
                     array_index = 2
-                elif byte_type == "byte4":
+                elif byte_name == "byte4":
                     array_index = 3
                 
                 # 检查数组索引是否有效
                 if array_index < len(state_data):
-                    # 使用8位宽度获取位值
-                    value = (state_data[array_index] >> bit) & 1
-                    if value is not None:
-                        records.append(create_record(code, value, definition, type_name, module_number))
+                    # 遍历当前字节的所有位定义
+                    for field_name, definition in byte_definitions.items():
+                        bit = definition.get("bit")
+                        if bit is None:
+                            continue
+                        
+                        # 使用8位宽度获取位值
+                        value = (state_data[array_index] >> bit) & 1
+                        
+                        # 创建完整的code标识符
+                        code = f"{byte_name}.{field_name}"
+                        
+                        if value is not None:
+                            records.append(create_record(code, value, definition, type_name, module_number))
         elif type_name == "bmsFaults":
-            # bmsFaults每4个元素表示一个类型，最后一个使用2个元素，每个元素8个字节
+            # bmsFaults每4个字节表示一个类型，最后一个使用2个字节
             for sub_type, sub_definitions in type_definitions.items():
                 # 确定子类型的起始索引
                 start_index = 0
